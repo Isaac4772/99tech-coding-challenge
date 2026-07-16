@@ -1,0 +1,3 @@
+[test]
+# Redirect the Prisma client to an isolated `test` schema before any test imports it.
+preload = ["./src/problem5/test.setup.ts"]

@@ -3,7 +3,10 @@
     "problem4": "bun run ./src/problem4/index.ts",
     "test:problem4": "bun test ./src/problem4/sum_to_n.test.ts",
     "problem5": "bun run ./src/problem5/src/index.ts",
-    "problem5:dev": "bun run --watch ./src/problem5/src/index.ts"
+    "problem5:dev": "bun run --watch ./src/problem5/src/index.ts",
+    "db:push:test": "bun --bun run prisma db push --url \"postgres://postgres:postgres@localhost:51214/template1?sslmode=disable&schema=test\"",
+    "pretest:problem5": "bun run db:push:test",
+    "test:problem5": "bun test ./src/problem5"
   },
   "dependencies": {
     "express": "^5.2.1"
