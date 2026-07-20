@@ -42,11 +42,16 @@ Spin up the local Prisma Postgres dev server (listens on ports 51214 / 51215,
 matching `.env.example`):
 
 ```sh
-bun --bun run prisma dev
+bunx prisma dev
 ```
 
 Leave this running in its own terminal. If you use your own Postgres instead,
 just point `DATABASE_URL` / `SHADOW_DATABASE_URL` at it.
+
+> **Note:** run the dev server with `bunx prisma dev`, not `bun --bun run
+> prisma dev`. The embedded Postgres (pglite) ships a WebAssembly asset that
+> Bun's runtime (`--bun`) fails to instantiate, producing
+> `errors building … pglite.data`.
 
 ### 3. Run the API
 
