@@ -76,3 +76,9 @@ bun run test:problem5
 
 Tests run against an isolated `test` schema; migrations are applied
 automatically to it via the `pretest:problem5` hook before the suite runs.
+
+## Problem 6 — Live Scoreboard Module (Specification)
+
+A design specification (no code) for a real-time top-10 scoreboard module,
+covering the API contract, data model, execution flows, and the auth and caching
+decisions. See [`src/problem6/README.md`](./src/problem6/README.md).
