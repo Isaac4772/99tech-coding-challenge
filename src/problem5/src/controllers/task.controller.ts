@@ -1,5 +1,6 @@
 import * as taskService from "@/services/task.service";
 import type { TaskCreateInput, TaskUpdateInput } from "@/types/task";
+import { sendSuccess, sendError } from "@/utils/response";
 import type { Request, Response, NextFunction } from "express";
 
 export const taskCreateController = async (
@@ -10,7 +11,7 @@ export const taskCreateController = async (
   try {
     const taskData: TaskCreateInput = req.body;
     const newTask = await taskService.createTaskService(taskData);
-    res.status(201).json(newTask);
+    sendSuccess(res, 201, newTask);
   } catch (error) {
     next(error);
   }
@@ -23,7 +24,7 @@ export const getAllTasksController = async (
 ) => {
   try {
     const tasks = await taskService.getAllTasksService();
-    res.status(200).json(tasks);
+    sendSuccess(res, 200, tasks);
   } catch (error) {
     next(error);
   }
@@ -37,14 +38,14 @@ export const getTaskByIdController = async (
   try {
     const { id } = req.params;
     if (typeof id !== "string") {
-      res.status(400).json({ message: "Invalid task id" });
+      sendError(res, 400, "Invalid task id");
       return;
     }
     const task = await taskService.getTaskByIdService(id);
     if (task) {
-      res.status(200).json(task);
+      sendSuccess(res, 200, task);
     } else {
-      res.status(404).json({ message: "Task not found" });
+      sendError(res, 404, "Task not found");
     }
   } catch (error) {
     next(error);
@@ -59,12 +60,12 @@ export const updateTaskController = async (
   try {
     const { id } = req.params;
     if (typeof id !== "string") {
-      res.status(400).json({ message: "Invalid task id" });
+      sendError(res, 400, "Invalid task id");
       return;
     }
     const taskData: TaskUpdateInput = req.body;
     const updatedTask = await taskService.updateTaskService(id, taskData);
-    res.status(200).json(updatedTask);
+    sendSuccess(res, 200, updatedTask);
   } catch (error) {
     next(error);
   }
@@ -78,12 +79,12 @@ export const deleteTaskController = async (
   try {
     const { id } = req.params;
     if (typeof id !== "string") {
-      res.status(400).json({ message: "Invalid task id" });
+      sendError(res, 400, "Invalid task id");
       return;
     }
     const deletedTask = await taskService.deleteTaskService(id);
-    res.status(200).json(deletedTask);
+    sendSuccess(res, 200, deletedTask);
   } catch (error) {
     next(error);
   }
-}; 
+};
