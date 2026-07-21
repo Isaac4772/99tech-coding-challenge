@@ -44,7 +44,7 @@ A backend service that:
 
 - The client is trusted for nothing regarding scores: not the amount, not the legitimacy.
 - The Action Service is the one that confirms an action really finished, then fires the internal score command.
-- The Score Module re-checks caller identity, replay, and idempotency before it writes a single row.
+- The Score Module re-checks caller identity *and authorization* (who may call, and whether this specific action is authorized), plus replay and idempotency, before it writes a single row.
 - Redis and SSE only distribute state. Neither is ever the authority.
 
 ![Architecture Overview](diagrams/component.png)
@@ -152,9 +152,17 @@ A backend service that:
 
 Applies exactly one validated action completion.
 
-Auth:
+Authentication (who is calling):
 
 - Requires service-to-service identity: internal JWT or mTLS, your call.
+
+Authorization (are they allowed to do this), in three layers:
+
+- **Endpoint level.** Authenticating the caller is not enough; the caller must also be *authorized* for this operation. With a JWT, check a claim such as `scope: "scores:increment"` and `aud: "score-module"`; with mTLS, check the client certificate against an allow-list of authorized services. Today only the Action Service is on that list.
+- **Per-action level.** `proofToken` is the real authorization for *this specific* score change (this is what the anti-tamper goal, "prevent unauthorized score increases," points at). It is a signed capability, minted by the Action Service, asserting that this action completion is entitled to a score bump. It carries at least `userId`, `actionInstanceId`, and `actionId`, plus an `exp`. It deliberately does **not** carry a score or delta: the amount is always server-side policy (see below), so there is nothing for the caller to assert. On the write path the Score Module verifies the signature *and* checks that these claims match the request body (e.g. the token's `userId` equals the body's `userId`), so a valid token for one action can't be replayed to authorize a different one. No valid proof when policy requires it → `403`. Note the division of labor: `proofToken` *authorizes* an action; it does **not** deduplicate it. Stopping the same authorized action from counting twice is the job of the `(user_id, action_instance_id)` replay guard and idempotency (§6, steps 5–6).
+- **Resource level (forward-looking).** There is currently no check that the caller may modify *this particular* `userId`, because the single trusted Action Service is authorized for every user. The moment a less-trusted or user-scoped caller exists, add the check that the authenticated subject is allowed to act on the target `userId` (typically: the token's subject equals the body's `userId`).
+
+The delta is never chosen by the caller either: it is looked up server-side from policy by `actionId` (§6, step 7). That is a least-privilege authorization constraint. Even a fully authenticated, authorized caller cannot name the number of points.
 
 Request body:
 
@@ -170,7 +178,7 @@ Request body:
 
 Worth noting:
 
-- `proofToken` is optional *only* while the write path is unreachable from the internet and the sole caller is the trusted-internal Action Service. It becomes **mandatory** the moment any internet-reachable or less-trusted path can hit this endpoint. At that point network topology is no longer a sufficient control for requirement #5.
+- `proofToken` is optional *only* while the write path is unreachable from the internet and the sole caller is the trusted-internal Action Service. It becomes **mandatory** the moment any internet-reachable or less-trusted path can hit this endpoint. At that point network topology is no longer a sufficient control for preventing unauthorized score increases.
 - When present it is verified early (§6, step 2), before any work is done on the request.
 - The delta is never sent by the caller. Full stop.
 
@@ -233,11 +241,26 @@ Stream contract:
 - `entries` always holds the **full current top-10**, so a client can draw the board from a single event without keeping any prior state. `leaderboardVersion` is just a freshness number, and `changedUserId` only highlights who moved.
 - The worker is the **only** thing that builds deltas: it writes both the full top-10 (`entries`) and `changedUserId` into each `delta_log` entry. Stream nodes never build their own; they just forward what the worker wrote (or, on a nudge with nothing new to replay, re-read the top-10). This stops two nodes from disagreeing about `changedUserId`.
 
-Example delta (`eventId` shown for illustration; on the wire it is the SSE `id:` field):
+Example snapshot (sent on first connect and as the resume fallback; `eventId` shown for illustration, on the wire it is the SSE `id:` field):
 
 ```json
 {
   "eventId": "1709889000123-0",
+  "type": "leaderboard.snapshot",
+  "leaderboardVersion": 102938,
+  "generatedAt": "2026-03-08T09:30:00.000Z",
+  "entries": [
+    { "rank": 1, "userId": "u1", "score": 9820 },
+    { "rank": 2, "userId": "u2", "score": 9640 }
+  ]
+}
+```
+
+Example delta (same shape plus `changedUserId`; carries no `generatedAt` since it is emitted per change, not per read):
+
+```json
+{
+  "eventId": "1709889000456-0",
   "type": "leaderboard.delta",
   "leaderboardVersion": 102939,
   "changedUserId": "u18",
@@ -252,8 +275,8 @@ Example delta (`eventId` shown for illustration; on the wire it is the SSE `id:`
 
 ### Order of checks
 
-1. Confirm the internal caller's identity.
-2. Verify `proofToken` if policy demands it; an authenticity check runs *before* we do any work on the request.
+1. **Authenticate, then authorize the caller.** First prove *who* is calling (JWT/mTLS); missing or invalid identity → `401`. Then check that identity is *allowed* to call this operation (a JWT `scope`/`aud` claim, or an mTLS cert on the allow-list); authenticated but not permitted → `403`.
+2. **Authorize this specific action** with `proofToken`, if policy demands it. Verify the signature *and* that its claims (`userId`, `actionInstanceId`, `actionId`) match the request body, so a proof for one action can't authorize another. This runs *before* any work is done. Invalid, or required and absent → `403`.
 3. Check the payload shape and required fields.
 4. Check the idempotency key is well-formed.
 5. Look up the idempotency record:
@@ -279,8 +302,8 @@ Example delta (`eventId` shown for illustration; on the wire it is the SSE `id:`
 ### Status codes
 
 - `400`: malformed body or bad field format.
-- `401`: internal caller auth missing or invalid.
-- `403`: proof token invalid, or required and absent.
+- `401`: caller authentication missing or invalid (we don't know *who* is calling).
+- `403`: caller is authenticated but not authorized: not permitted for this operation, or a `proofToken` that is invalid, mismatched, or required and absent.
 - `409`: replayed `actionInstanceId`, or an idempotency hash mismatch.
 - `500`: something broke that shouldn't have.
 
